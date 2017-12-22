@@ -16,6 +16,7 @@
 #include <QDebug>
 
 #include "Drivers/src/ubx.h"
+#include "Drivers/src/inertialsense.h"
 #include "Drivers/src/gps_helper.h"
 #include "definitions.h"
 
@@ -46,27 +47,43 @@ void GPSProvider::run()
         qWarning() << "GPS: Failed to open Serial Device" << _device;
         return;
     }
-    _serial->setBaudRate(QSerialPort::Baud9600);
+    _serial->setBaudRate(QSerialPort::Baud115200);
     _serial->setDataBits(QSerialPort::Data8);
     _serial->setParity(QSerialPort::NoParity);
     _serial->setStopBits(QSerialPort::OneStop);
     _serial->setFlowControl(QSerialPort::NoFlowControl);
 
     unsigned int baudrate;
-    GPSDriverUBX* gpsDriver = nullptr;
+    GPSHelper* gpsDriver = nullptr;
 
     while (!_requestStop) {
 
+        // Clear any previous Driver
         if (gpsDriver) {
             delete gpsDriver;
             gpsDriver = nullptr;
         }
 
+        // Determine which kind of GPS we have
+        bool valid_GPS_driver = false;
+        // Check for a UBLOX
         gpsDriver = new GPSDriverUBX(GPSDriverUBX::Interface::UART, &callbackEntry, this, &_reportGpsPos, _pReportSatInfo);
-        gpsDriver->setSurveyInSpecs(_surveyInAccMeters * 10000, _surveryInDurationSecs);
+        if (gpsDriver->configure(baudrate, GPSDriverUBX::OutputMode::RTCM) >= 0)
+        {
+          valid_GPS_driver = true;
+        }
+        else
+        {
+          // Check for an InertialSense
+          gpsDriver = new GPSDriverInertialSense(GPSHelper::Interface::UART, &callbackEntry, this, &_reportGpsPos, _pReportSatInfo);
+          if (gpsDriver->configure(baudrate, GPSHelper::OutputMode::RTCM) >= 0)
+            valid_GPS_driver = true;
+        }
 
-        if (gpsDriver->configure(baudrate, GPSDriverUBX::OutputMode::RTCM) == 0) {
 
+        if (valid_GPS_driver)
+        {
+            gpsDriver->setSurveyInSpecs(_surveyInAccMeters * 10000, _surveryInDurationSecs);
             /* reset report */
             memset(&_reportGpsPos, 0, sizeof(_reportGpsPos));
 
