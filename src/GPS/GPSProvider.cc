@@ -75,6 +75,7 @@ void GPSProvider::run()
         else
         {
           // Check for an InertialSense
+          delete gpsDriver;
           gpsDriver = new GPSDriverInertialSense(GPSHelper::Interface::UART, &callbackEntry, this, &_reportGpsPos, _pReportSatInfo);
           if (gpsDriver->configure(baudrate, GPSHelper::OutputMode::RTCM) >= 0)
             valid_GPS_driver = true;

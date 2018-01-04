@@ -388,14 +388,17 @@ HEADERS += \
     src/api/QGCOptions.h \
     src/api/QGCSettings.h \
     src/api/QmlComponentInfo.h \
-    src/GPS/Drivers/src/inertialsense.h
+    src/GPS/Drivers/src/inertialsense.h \
+    src/GPS/Drivers/src/InertialSenseSDK/src/InertialSense.h
 
 SOURCES += \
     src/api/QGCCorePlugin.cc \
     src/api/QGCOptions.cc \
     src/api/QGCSettings.cc \
     src/api/QmlComponentInfo.cc \
-    src/GPS/Drivers/src/inertialsense.cpp
+    src/GPS/Drivers/src/inertialsense.cpp \
+    src/GPS/Drivers/src/InertialSenseSDK/src/com_manager.c \
+    src/GPS/Drivers/src/InertialSenseSDK/src/data_sets.c
 
 #
 # Unit Test specific configuration goes here (requires full debug build with all plugins)
