@@ -398,7 +398,10 @@ SOURCES += \
     src/api/QmlComponentInfo.cc \
     src/GPS/Drivers/src/inertialsense.cpp \
     src/GPS/Drivers/src/InertialSenseSDK/src/com_manager.c \
-    src/GPS/Drivers/src/InertialSenseSDK/src/data_sets.c
+    src/GPS/Drivers/src/InertialSenseSDK/src/data_sets.c \
+    src/GPS/Drivers/src/InertialSenseSDK/src/ISMatrix.c \
+    src/GPS/Drivers/src/InertialSenseSDK/src/ISPose.c \
+    src/GPS/Drivers/src/InertialSenseSDK/src/ISEarth.c
 
 #
 # Unit Test specific configuration goes here (requires full debug build with all plugins)
