@@ -10,6 +10,8 @@
 
 #include "GPSProvider.h"
 #include "QGCLoggingCategory.h"
+#include "QGCApplication.h"
+#include "SettingsManager.h"
 
 #define GPS_RECEIVE_TIMEOUT 1200
 
@@ -17,7 +19,8 @@
 
 #include "Drivers/src/ubx.h"
 #include "Drivers/src/inertialsense.h"
-#include "Drivers/src/gps_helper.h"
+#include "Drivers/src/ashtech.h"
+#include "Drivers/src/base_station.h"
 #include "definitions.h"
 
 //#define SIMULATE_RTCM_OUTPUT //if defined, generate simulated RTCM messages
@@ -44,8 +47,21 @@ void GPSProvider::run()
     _serial = new QSerialPort();
     _serial->setPortName(_device);
     if (!_serial->open(QIODevice::ReadWrite)) {
-        qWarning() << "GPS: Failed to open Serial Device" << _device;
-        return;
+        int retries = 60;
+        // Give the device some time to come up. In some cases the device is not
+        // immediately accessible right after startup for some reason. This can take 10-20s.
+        while (retries-- > 0 && _serial->error() == QSerialPort::PermissionError) {
+            qCDebug(RTKGPSLog) << "Cannot open device... retrying";
+            msleep(500);
+            if (_serial->open(QIODevice::ReadWrite)) {
+                _serial->clearError();
+                break;
+            }
+        }
+        if (_serial->error() != QSerialPort::NoError) {
+            qWarning() << "GPS: Failed to open Serial Device" << _device << _serial->errorString();
+            return;
+        }
     }
     _serial->setBaudRate(QSerialPort::Baud115200);
     _serial->setDataBits(QSerialPort::Data8);
@@ -54,7 +70,7 @@ void GPSProvider::run()
     _serial->setFlowControl(QSerialPort::NoFlowControl);
 
     unsigned int baudrate;
-    GPSHelper* gpsDriver = nullptr;
+    GPSBaseStationSupport* gpsDriver = nullptr;
 
     while (!_requestStop) {
 
@@ -65,24 +81,27 @@ void GPSProvider::run()
         }
 
         // Determine which kind of GPS we have
-        bool valid_GPS_driver = false;
-        // Check for a UBLOX
-        gpsDriver = new GPSDriverUBX(GPSDriverUBX::Interface::UART, &callbackEntry, this, &_reportGpsPos, _pReportSatInfo);
-        if (gpsDriver->configure(baudrate, GPSDriverUBX::OutputMode::RTCM) >= 0)
-        {
-          valid_GPS_driver = true;
+        if (_type == GPSType::trimble) {
+            gpsDriver = new GPSDriverAshtech(&callbackEntry, this, &_reportGpsPos, _pReportSatInfo);
+            baudrate = 115200;
         }
-        else
-        {
-          // Check for an InertialSense
-          delete gpsDriver;
-          gpsDriver = new GPSDriverInertialSense(GPSHelper::Interface::UART, &callbackEntry, this, &_reportGpsPos, _pReportSatInfo);
-          if (gpsDriver->configure(baudrate, GPSHelper::OutputMode::RTCM) >= 0)
-            valid_GPS_driver = true;
+        else if (_type == GPSType::inertial_sense) {
+            gpsDriver = new GPSDriverInertialSense(GPSHelper::Interface::UART, &callbackEntry, this, &_reportGpsPos, _pReportSatInfo);
+            baudrate = 921600;
+        }
+        else {
+            gpsDriver = new GPSDriverUBX(GPSDriverUBX::Interface::UART, &callbackEntry, this, &_reportGpsPos, _pReportSatInfo);
+            baudrate = 0; // auto-configure
+        }
+        gpsDriver->setSurveyInSpecs(_surveyInAccMeters * 10000.0f, _surveryInDurationSecs);
+
+        if (_useFixedBaseLoction) {
+            gpsDriver->setBasePosition(_fixedBaseLatitude, _fixedBaseLongitude, _fixedBaseAltitudeMeters, _fixedBaseAccuracyMeters * 1000.0f);
         }
 
 
-        if (valid_GPS_driver)
+
+        if (gpsDriver->configure(baudrate, GPSDriverUBX::OutputMode::RTCM) == 0)
         {
             gpsDriver->setSurveyInSpecs(_surveyInAccMeters * 10000, _surveryInDurationSecs);
             /* reset report */
@@ -119,11 +138,27 @@ void GPSProvider::run()
     qCDebug(RTKGPSLog) << "Exiting GPS thread";
 }
 
-GPSProvider::GPSProvider(const QString& device, bool enableSatInfo, double surveyInAccMeters, int surveryInDurationSecs, const std::atomic_bool& requestStop)
-    : _device(device)
-    , _requestStop(requestStop)
-    , _surveyInAccMeters(surveyInAccMeters)
-    , _surveryInDurationSecs(surveryInDurationSecs)
+GPSProvider::GPSProvider(const QString& device,
+                         GPSType    type,
+                         bool       enableSatInfo,
+                         double     surveyInAccMeters,
+                         int        surveryInDurationSecs,
+                         bool       useFixedBaseLocation,
+                         double     fixedBaseLatitude,
+                         double     fixedBaseLongitude,
+                         float      fixedBaseAltitudeMeters,
+                         float      fixedBaseAccuracyMeters,
+                         const std::atomic_bool& requestStop)
+    : _device                   (device)
+    , _type                     (type)
+    , _requestStop              (requestStop)
+    , _surveyInAccMeters        (surveyInAccMeters)
+    , _surveryInDurationSecs    (surveryInDurationSecs)
+    , _useFixedBaseLoction      (useFixedBaseLocation)
+    , _fixedBaseLatitude        (fixedBaseLatitude)
+    , _fixedBaseLongitude       (fixedBaseLongitude)
+    , _fixedBaseAltitudeMeters  (fixedBaseAltitudeMeters)
+    , _fixedBaseAccuracyMeters  (fixedBaseAccuracyMeters)
 {
     qCDebug(RTKGPSLog) << "Survey in accuracy:duration" << surveyInAccMeters << surveryInDurationSecs;
     if (enableSatInfo) _pReportSatInfo = new satellite_info_s();
@@ -189,8 +224,10 @@ int GPSProvider::callback(GPSCallbackType type, void *data1, int data2)
         case GPSCallbackType::surveyInStatus:
         {
             SurveyInStatus* status = (SurveyInStatus*)data1;
+            qCDebug(RTKGPSLog) << "Position: " << status->latitude << status->longitude << status->altitude;
+
             qCDebug(RTKGPSLog) << QString("Survey-in status: %1s cur accuracy: %2mm valid: %3 active: %4").arg(status->duration).arg(status->mean_accuracy).arg((int)(status->flags & 1)).arg((int)((status->flags>>1) & 1));
-            emit surveyInStatus(status->duration, status->mean_accuracy, (int)(status->flags & 1), (int)((status->flags>>1) & 1));
+            emit surveyInStatus(status->duration, status->mean_accuracy, status->latitude, status->longitude, status->altitude, (int)(status->flags & 1), (int)((status->flags>>1) & 1));
         }
             break;
 

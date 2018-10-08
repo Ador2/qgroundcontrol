@@ -7,12 +7,11 @@
  *
  ****************************************************************************/
 
-
-/// @file
-///     @author Don Gagne <don@thegagnes.com>
-
 #include "Fact.h"
+#include "FactValueSliderListModel.h"
 #include "QGCMAVLink.h"
+#include "QGCApplication.h"
+#include "QGCCorePlugin.h"
 
 #include <QtQml>
 #include <QQmlEngine>
@@ -20,41 +19,67 @@
 static const char* kMissingMetadata = "Meta data pointer missing";
 
 Fact::Fact(QObject* parent)
-    : QObject(parent)
-    , _componentId(-1)
-    , _rawValue(0)
-    , _type(FactMetaData::valueTypeInt32)
-    , _metaData(NULL)
-    , _sendValueChangedSignals(true)
+    : QObject                   (parent)
+    , _componentId              (-1)
+    , _rawValue                 (0)
+    , _type                     (FactMetaData::valueTypeInt32)
+    , _metaData                 (NULL)
+    , _sendValueChangedSignals  (true)
     , _deferredValueChangeSignal(false)
+    , _valueSliderModel         (NULL)
 {    
     FactMetaData* metaData = new FactMetaData(_type, this);
     setMetaData(metaData);
 
-    // Better safe than sorry on object ownership
-    QQmlEngine::setObjectOwnership(this, QQmlEngine::CppOwnership);
+    _init();
 }
 
 Fact::Fact(int componentId, QString name, FactMetaData::ValueType_t type, QObject* parent)
-    : QObject(parent)
-    , _name(name)
-    , _componentId(componentId)
-    , _rawValue(0)
-    , _type(type)
-    , _metaData(NULL)
-    , _sendValueChangedSignals(true)
+    : QObject                   (parent)
+    , _name                     (name)
+    , _componentId              (componentId)
+    , _rawValue                 (0)
+    , _type                     (type)
+    , _metaData                 (NULL)
+    , _sendValueChangedSignals  (true)
     , _deferredValueChangeSignal(false)
+    , _valueSliderModel         (NULL)
 {
     FactMetaData* metaData = new FactMetaData(_type, this);
     setMetaData(metaData);
-    QQmlEngine::setObjectOwnership(this, QQmlEngine::CppOwnership);
+
+    _init();
+}
+
+Fact::Fact(const QString& settingsGroup, FactMetaData* metaData, QObject* parent)
+    : QObject(parent)
+    , _name                     (metaData->name())
+    , _componentId              (0)
+    , _rawValue                 (0)
+    , _type                     (metaData->type())
+    , _metaData                 (NULL)
+    , _sendValueChangedSignals  (true)
+    , _deferredValueChangeSignal(false)
+    , _valueSliderModel         (NULL)
+{
+    qgcApp()->toolbox()->corePlugin()->adjustSettingMetaData(settingsGroup, *metaData);
+    setMetaData(metaData, true /* setDefaultFromMetaData */);
+
+    _init();
 }
 
 Fact::Fact(const Fact& other, QObject* parent)
     : QObject(parent)
 {
     *this = other;
+
+    _init();
+}
+
+void Fact::_init(void)
+{
     QQmlEngine::setObjectOwnership(this, QQmlEngine::CppOwnership);
+    connect(this, &Fact::_containerRawValueChanged, this, &Fact::_checkForRebootMessaging);
 }
 
 const Fact& Fact::operator=(const Fact& other)
@@ -65,7 +90,7 @@ const Fact& Fact::operator=(const Fact& other)
     _type                       = other._type;
     _sendValueChangedSignals    = other._sendValueChangedSignals;
     _deferredValueChangeSignal  = other._deferredValueChangeSignal;
-
+    _valueSliderModel       = NULL;
     if (_metaData && other._metaData) {
         *_metaData = *other._metaData;
     } else {
@@ -148,9 +173,11 @@ void Fact::_containerSetRawValue(const QVariant& value)
     if(_rawValue != value) {
         _rawValue = value;
         _sendValueChangedSignal(cookedValue());
-        emit vehicleUpdated(_rawValue);
         emit rawValueChanged(_rawValue);
     }
+
+    // This always need to be signalled in order to support forceSetRawValue usage and waiting for vehicleUpdated signal
+    emit vehicleUpdated(_rawValue);
 }
 
 QString Fact::name(void) const
@@ -291,6 +318,9 @@ QString Fact::_variantToString(const QVariant& variant, int decimalPlaces) const
             valueString = QString("%1").arg(dValue, 0, 'f', decimalPlaces);
         }
     }
+        break;
+    case FactMetaData::valueTypeBool:
+        valueString = variant.toBool() ? tr("true") : tr("false");
         break;
     case FactMetaData::valueTypeElapsedTimeInSeconds:
     {
@@ -484,6 +514,16 @@ int Fact::decimalPlaces(void) const
     }
 }
 
+QString Fact::category(void) const
+{
+    if (_metaData) {
+        return _metaData->category();
+    } else {
+        qWarning() << kMissingMetadata << name();
+        return QString();
+    }
+}
+
 QString Fact::group(void) const
 {
     if (_metaData) {
@@ -558,10 +598,20 @@ QVariant Fact::clamp(const QString& cookedValue)
     return QVariant();
 }
 
-bool Fact::rebootRequired(void) const
+bool Fact::vehicleRebootRequired(void) const
 {
     if (_metaData) {
-        return _metaData->rebootRequired();
+        return _metaData->vehicleRebootRequired();
+    } else {
+        qWarning() << kMissingMetadata << name();
+        return false;
+    }
+}
+
+bool Fact::qgcRebootRequired(void) const
+{
+    if (_metaData) {
+        return _metaData->qgcRebootRequired();
     } else {
         qWarning() << kMissingMetadata << name();
         return false;
@@ -608,10 +658,20 @@ QString Fact::enumOrValueString(void)
     return QString();
 }
 
-double Fact::increment(void) const
+double Fact::rawIncrement(void) const
 {
     if (_metaData) {
-        return _metaData->increment();
+        return _metaData->rawIncrement();
+    } else {
+        qWarning() << kMissingMetadata << name();
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+double Fact::cookedIncrement(void) const
+{
+    if (_metaData) {
+        return _metaData->cookedIncrement();
     } else {
         qWarning() << kMissingMetadata << name();
     }
@@ -635,5 +695,44 @@ bool Fact::readOnly(void) const
     } else {
         qWarning() << kMissingMetadata << name();
         return false;
+    }
+}
+
+bool Fact::writeOnly(void) const
+{
+    if (_metaData) {
+        return _metaData->writeOnly();
+    } else {
+        qWarning() << kMissingMetadata << name();
+        return false;
+    }
+}
+
+bool Fact::volatileValue(void) const
+{
+    if (_metaData) {
+        return _metaData->volatileValue();
+    } else {
+        qWarning() << kMissingMetadata << name();
+        return false;
+    }
+}
+
+FactValueSliderListModel* Fact::valueSliderModel(void)
+{
+    if (!_valueSliderModel) {
+        _valueSliderModel = new FactValueSliderListModel(*this);
+    }
+    return _valueSliderModel;
+}
+
+void Fact::_checkForRebootMessaging(void)
+{
+    if (!qgcApp()->runningUnitTests()) {
+        if (vehicleRebootRequired()) {
+            qgcApp()->showMessage(tr("Change of parameter %1 requires a Vehicle reboot to take effect.").arg(name()));
+        } else if (qgcRebootRequired()) {
+            qgcApp()->showMessage(tr("Change of '%1' value requires restart of %2 to take effect.").arg(shortDescription()).arg(qgcApp()->applicationName()));
+        }
     }
 }

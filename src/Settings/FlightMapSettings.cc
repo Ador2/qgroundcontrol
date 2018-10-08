@@ -16,13 +16,14 @@
 #include <QQmlEngine>
 #include <QtQml>
 
-const char* FlightMapSettings::flightMapSettingsGroupName =  "FlightMap";
-const char* FlightMapSettings::mapProviderSettingsName =     "MapProvider";
-const char* FlightMapSettings::mapTypeSettingsName =         "MapType";
-const char* FlightMapSettings::_settingsGroupName =          "FlightMap";
+const char* FlightMapSettings::name =                       "FlightMap";
+const char* FlightMapSettings::settingsGroup =              "FlightMap";
+
+const char* FlightMapSettings::mapProviderSettingsName =    "MapProvider";
+const char* FlightMapSettings::mapTypeSettingsName =        "MapType";
 
 FlightMapSettings::FlightMapSettings(QObject* parent)
-    : SettingsGroup(flightMapSettingsGroupName, QString(_settingsGroupName) /* root settings group */, parent)
+    : SettingsGroup(name, settingsGroup, parent)
     , _mapProviderFact(NULL)
     , _mapTypeFact(NULL)
 {
@@ -118,6 +119,9 @@ void FlightMapSettings::_newMapProvider(QVariant value)
     case mapProviderEsri:
         _removeEnumValue(mapTypeHybrid, enumStrings, enumValues);
         break;
+    case mapProviderVWorld:
+        _removeEnumValue(mapTypeHybrid, enumStrings, enumValues);
+        _removeEnumValue(mapTypeTerrain, enumStrings, enumValues);
     }
     metaData->setEnumInfo(enumStrings, enumValues);
     emit mapTypeChanged();

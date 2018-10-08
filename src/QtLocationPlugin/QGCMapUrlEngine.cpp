@@ -122,6 +122,15 @@ UrlFactory::getImageFormat(MapType type, const QByteArray& image)
                 case BingHybrid:
                     format = "jpg";
                     break;
+                case AirmapElevation:
+                    format = "bin";
+                    break;
+                case VWorldStreet :
+                    format = "png";
+                    break;
+                case VWorldSatellite :
+                    format = "jpg";
+                    break;
                 default:
                     qWarning("UrlFactory::getImageFormat() Unknown map id %d", type);
                     break;
@@ -138,8 +147,9 @@ UrlFactory::getTileURL(MapType type, int x, int y, int zoom, QNetworkAccessManag
     //-- Build URL
     QNetworkRequest request;
     QString url = _getURL(type, x, y, zoom, networkManager);
-    if(url.isEmpty())
+    if(url.isEmpty()) {
         return request;
+    }
     request.setUrl(QUrl(url));
     request.setRawHeader("Accept", "*/*");
     switch (type) {
@@ -182,6 +192,10 @@ UrlFactory::getTileURL(MapType type, int x, int y, int zoom, QNetworkAccessManag
                 request.setRawHeader("User-Token", token);
             }
             return request;
+
+        case AirmapElevation:
+            request.setRawHeader("Referrer", "https://api.airmap.com/");
+            break;
 
         default:
             break;
@@ -262,7 +276,7 @@ UrlFactory::_getURL(MapType type, int x, int y, int zoom, QNetworkAccessManager*
 #endif
     case StatkartTopo:
     {
-        return QString("http://opencache.statkart.no/gatekeeper/gk/gk.open_gmaps?layers=topo2&zoom=%1&x=%2&y=%3").arg(zoom).arg(x).arg(y);
+        return QString("http://opencache.statkart.no/gatekeeper/gk/gk.open_gmaps?layers=topo4&zoom=%1&x=%2&y=%3").arg(zoom).arg(x).arg(y);
     }
     break;
     case EniroTopo:
@@ -403,7 +417,58 @@ UrlFactory::_getURL(MapType type, int x, int y, int zoom, QNetworkAccessManager*
         }
     }
     break;
+    case AirmapElevation:
+    {
+        return QString("https://api.airmap.com/elevation/v1/ele/carpet?points=%1,%2,%3,%4").arg(static_cast<double>(y)*QGCMapEngine::srtm1TileSize - 90.0).arg(
+                                                                                                static_cast<double>(x)*QGCMapEngine::srtm1TileSize - 180.0).arg(
+                                                                                                static_cast<double>(y + 1)*QGCMapEngine::srtm1TileSize - 90.0).arg(
+                                                                                                static_cast<double>(x + 1)*QGCMapEngine::srtm1TileSize - 180.0);
+    }
+    break;
 
+    case VWorldStreet :
+    {
+        int gap = zoom - 6;
+        int x_min = 53 * pow(2, gap);
+        int x_max = 55 * pow(2, gap) + (2*gap - 1);
+        int y_min = 22 * pow(2, gap);
+        int y_max = 26 * pow(2, gap) + (2*gap - 1);
+
+        if ( zoom > 19 ) {
+            return QString("");
+        }
+        else if ( zoom > 5 && x >= x_min && x <= x_max && y >= y_min && y <= y_max ) {
+            return QString("http://xdworld.vworld.kr:8080/2d/Base/service/%1/%2/%3.png").arg(zoom).arg(x).arg(y);
+        }
+        else {
+            QString key = _tileXYToQuadKey(x, y, zoom);
+            return QString("http://ecn.t%1.tiles.virtualearth.net/tiles/r%2.png?g=%3&mkt=%4").arg(_getServerNum(x, y, 4)).arg(key).arg(_versionBingMaps).arg(_language);
+        }
+
+
+    }
+        break;
+
+    case VWorldSatellite :
+    {
+        int gap = zoom - 6;
+        int x_min = 53 * pow(2, gap);
+        int x_max = 55 * pow(2, gap) + (2*gap - 1);
+        int y_min = 22 * pow(2, gap);
+        int y_max = 26 * pow(2, gap) + (2*gap - 1);
+
+        if ( zoom > 19 ) {
+            return QString("");
+        }
+        else if ( zoom > 5 && x >= x_min && x <= x_max && y >= y_min && y <= y_max ) {
+            return QString("http://xdworld.vworld.kr:8080/2d/Satellite/service/%1/%2/%3.jpeg").arg(zoom).arg(x).arg(y);
+        }
+        else {
+            QString key = _tileXYToQuadKey(x, y, zoom);
+            return QString("http://ecn.t%1.tiles.virtualearth.net/tiles/a%2.jpeg?g=%3&mkt=%4").arg(_getServerNum(x, y, 4)).arg(key).arg(_versionBingMaps).arg(_language);
+        }
+    }
+        break;
     default:
         qWarning("Unknown map id %d\n", type);
         break;
@@ -545,6 +610,7 @@ UrlFactory::_tryCorrectGoogleVersions(QNetworkAccessManager* networkManager)
 #define AVERAGE_MAPBOX_SAT_MAP      15739
 #define AVERAGE_MAPBOX_STREET_MAP   5648
 #define AVERAGE_TILE_SIZE           13652
+#define AVERAGE_AIRMAP_ELEV_SIZE    2786
 
 //-----------------------------------------------------------------------------
 quint32
@@ -568,6 +634,8 @@ UrlFactory::averageSizeForType(MapType type)
     case MapboxStreetsBasic:
     case MapboxRunBikeHike:
         return AVERAGE_MAPBOX_STREET_MAP;
+    case AirmapElevation:
+        return AVERAGE_AIRMAP_ELEV_SIZE;
     case GoogleLabels:
     case MapboxDark:
     case MapboxLight:

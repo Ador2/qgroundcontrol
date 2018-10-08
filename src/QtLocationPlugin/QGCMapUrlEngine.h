@@ -56,6 +56,10 @@ public:
         MapQuestSat             = 701,
         */
 
+        VWorldMap                = 800,
+        VWorldSatellite          = 801,
+        VWorldStreet             = 802,
+
         MapboxStreets           = 6000,
         MapboxLight             = 6001,
         MapboxDark              = 6002,
@@ -73,7 +77,9 @@ public:
 
         EsriWorldStreet         = 7000,
         EsriWorldSatellite      = 7001,
-        EsriTerrain             = 7002
+        EsriTerrain             = 7002,
+
+        AirmapElevation         = 8001
     };
 
     UrlFactory      ();

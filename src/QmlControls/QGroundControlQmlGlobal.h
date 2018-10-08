@@ -22,10 +22,7 @@
 #include "SimulatedPosition.h"
 #include "QGCLoggingCategory.h"
 #include "AppSettings.h"
-#ifndef __mobile__
-#include "GPS/GPSManager.h"
-#endif /* __mobile__ */
-#include "GPSRTKFactGroup.h"
+#include "AirspaceManager.h"
 
 #ifdef QT_DEBUG
 #include "MockLink.h"
@@ -53,6 +50,8 @@ public:
     Q_PROPERTY(QGCCorePlugin*       corePlugin          READ corePlugin             CONSTANT)
     Q_PROPERTY(SettingsManager*     settingsManager     READ settingsManager        CONSTANT)
     Q_PROPERTY(FactGroup*           gpsRtk              READ gpsRtkFactGroup        CONSTANT)
+    Q_PROPERTY(AirspaceManager*     airspaceManager     READ airspaceManager        CONSTANT)
+    Q_PROPERTY(bool                 airmapSupported     READ airmapSupported        CONSTANT)
 
     Q_PROPERTY(int      supportedFirmwareCount          READ supportedFirmwareCount CONSTANT)
 
@@ -141,9 +140,10 @@ public:
     MAVLinkLogManager*      mavlinkLogManager   ()  { return _mavlinkLogManager; }
     QGCCorePlugin*          corePlugin          ()  { return _corePlugin; }
     SettingsManager*        settingsManager     ()  { return _settingsManager; }
-    FactGroup*              gpsRtkFactGroup     ()  { return &_gpsRtkFactGroup; }
-    static QGeoCoordinate   flightMapPosition   ();
-    static double           flightMapZoom       ();
+    FactGroup*              gpsRtkFactGroup     ()  { return _gpsRtkFactGroup; }
+    AirspaceManager*        airspaceManager     ()  { return _airspaceManager; }
+    static QGeoCoordinate   flightMapPosition   ()  { return _coord; }
+    static double           flightMapZoom       ()  { return _zoom; }
 
     qreal zOrderTopMost             () { return 1000; }
     qreal zOrderWidgets             () { return 100; }
@@ -171,6 +171,11 @@ public:
 
     QString qgcVersion(void) const { return qgcApp()->applicationVersion(); }
 
+#if defined(QGC_AIRMAP_ENABLED)
+    bool    airmapSupported() { return true; }
+#else
+    bool    airmapSupported() { return false; }
+#endif
 
     // Overrides from QGCTool
     virtual void setToolbox(QGCToolbox* toolbox);
@@ -182,12 +187,6 @@ signals:
     void flightMapPositionChanged       (QGeoCoordinate flightMapPosition);
     void flightMapZoomChanged           (double flightMapZoom);
     void skipSetupPageChanged           ();
-
-private slots:
-    void _onGPSConnect();
-    void _onGPSDisconnect();
-    void _GPSSurveyInStatus(float duration, float accuracyMM, bool valid, bool active);
-    void _GPSNumSatellites(int numSatellites);
 
 private:
     double                  _flightMapInitialZoom;
@@ -201,7 +200,8 @@ private:
     QGCCorePlugin*          _corePlugin;
     FirmwarePluginManager*  _firmwarePluginManager;
     SettingsManager*        _settingsManager;
-    GPSRTKFactGroup         _gpsRtkFactGroup;
+    FactGroup*              _gpsRtkFactGroup;
+    AirspaceManager*        _airspaceManager;
 
     bool                    _skipSetupPage;
 
@@ -209,6 +209,9 @@ private:
     static const char* _flightMapPositionLatitudeSettingsKey;
     static const char* _flightMapPositionLongitudeSettingsKey;
     static const char* _flightMapZoomSettingsKey;
+
+    static QGeoCoordinate   _coord;
+    static double           _zoom;
 };
 
 #endif

@@ -50,11 +50,11 @@
 
 #include <QtLocation/private/qgeocameracapabilities_p.h>
 #include <QtLocation/private/qgeomaptype_p.h>
-#if QT_VERSION < 0x050500
+#if QT_VERSION < QT_VERSION_CHECK(5, 5, 0)
 #include <QtLocation/private/qgeotiledmapdata_p.h>
 #else
 #include <QtLocation/private/qgeotiledmap_p.h>
-#if QT_VERSION >= 0x050600
+#if QT_VERSION >= QT_VERSION_CHECK(5, 6, 0)
 #include <QtLocation/private/qgeofiletilecache_p.h>
 #else
 #include <QtLocation/private/qgeotilecache_p.h>
@@ -64,19 +64,13 @@
 #include <QDir>
 #include <QStandardPaths>
 
-#if QT_VERSION >= 0x050500
+#if QT_VERSION >= QT_VERSION_CHECK(5, 5, 0)
 //-----------------------------------------------------------------------------
 QGeoTiledMapQGC::QGeoTiledMapQGC(QGeoTiledMappingManagerEngine *engine, QObject *parent)
     : QGeoTiledMap(engine, parent)
 {
 
 }
-#endif
-
-#if QT_VERSION >= 0x050900
-#define QGCGEOMAPTYPE(a,b,c,d,e,f)  QGeoMapType(a,b,c,d,e,f,QByteArray("QGroundControl"))
-#else
-#define QGCGEOMAPTYPE(a,b,c,d,e,f)  QGeoMapType(a,b,c,d,e,f)
 #endif
 
 //-----------------------------------------------------------------------------
@@ -91,6 +85,16 @@ QGeoTiledMappingManagerEngineQGC::QGeoTiledMappingManagerEngineQGC(const QVarian
     setCameraCapabilities(cameraCaps);
 
     setTileSize(QSize(256, 256));
+
+    // In Qt 5.10 QGeoMapType need QGeoCameraCapabilities as argument
+    // E.g: https://github.com/qt/qtlocation/blob/2b230b0a10d898979e9d5193f4da2e408b397fe3/src/plugins/geoservices/osm/qgeotiledmappingmanagerengineosm.cpp#L167
+    #if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
+    #define QGCGEOMAPTYPE(a,b,c,d,e,f)  QGeoMapType(a,b,c,d,e,f,QByteArray("QGroundControl"), cameraCaps)
+    #elif QT_VERSION >= QT_VERSION_CHECK(5, 9, 0)
+    #define QGCGEOMAPTYPE(a,b,c,d,e,f)  QGeoMapType(a,b,c,d,e,f,QByteArray("QGroundControl"))
+    #else
+    #define QGCGEOMAPTYPE(a,b,c,d,e,f)  QGeoMapType(a,b,c,d,e,f)
+    #endif
 
     /*
      * Google and Bing don't seem kosher at all. This was based on original code from OpenPilot and heavily modified to be used in QGC.
@@ -129,6 +133,10 @@ QGeoTiledMappingManagerEngineQGC::QGeoTiledMappingManagerEngineQGC(const QVarian
     mapTypes << QGCGEOMAPTYPE(QGeoMapType::SatelliteMapDay,   "Esri Satellite Map",       "ArcGIS Online World Imagery",      true,   false,  UrlFactory::EsriWorldSatellite);
     mapTypes << QGCGEOMAPTYPE(QGeoMapType::TerrainMap,        "Esri Terrain Map",         "World Terrain Base",               false,  false,  UrlFactory::EsriTerrain);
 
+    // VWorld
+    mapTypes << QGCGEOMAPTYPE(QGeoMapType::SatelliteMapDay,   "VWorld Satellite Map",      "VWorld Satellite Map",               false,  false,  UrlFactory::VWorldSatellite);
+    mapTypes << QGCGEOMAPTYPE(QGeoMapType::StreetMap,         "VWorld Street Map",         "VWorld Street Map",                  false,  false,  UrlFactory::VWorldStreet);
+
     /* See: https://wiki.openstreetmap.org/wiki/Tile_usage_policy
     mapTypes << QGCGEOMAPTYPE(QGeoMapType::StreetMap,         "Open Street Map",          "Open Street map",              false, false, UrlFactory::OpenStreetMap);
     */
@@ -165,7 +173,7 @@ QGeoTiledMappingManagerEngineQGC::QGeoTiledMappingManagerEngineQGC(const QVarian
         getQGCMapEngine()->setUserAgent(parameters.value(QStringLiteral("useragent")).toString().toLatin1());
     }
 
-#if QT_VERSION >= 0x050500
+#if QT_VERSION >= QT_VERSION_CHECK(5, 5, 0)
     _setCache(parameters);
 #endif
 
@@ -180,7 +188,7 @@ QGeoTiledMappingManagerEngineQGC::~QGeoTiledMappingManagerEngineQGC()
 {
 }
 
-#if QT_VERSION < 0x050500
+#if QT_VERSION < QT_VERSION_CHECK(5, 5, 0)
 
 //-----------------------------------------------------------------------------
 QGeoMapData *QGeoTiledMappingManagerEngineQGC::createMapData()
@@ -199,7 +207,7 @@ QGeoTiledMappingManagerEngineQGC::createMap()
 
 #endif
 
-#if QT_VERSION >= 0x050500
+#if QT_VERSION >= QT_VERSION_CHECK(5, 5, 0)
 //-----------------------------------------------------------------------------
 void
 QGeoTiledMappingManagerEngineQGC::_setCache(const QVariantMap &parameters)
@@ -212,7 +220,7 @@ QGeoTiledMappingManagerEngineQGC::_setCache(const QVariantMap &parameters)
         if(!QFileInfo(cacheDir).exists()) {
             if(!QDir::root().mkpath(cacheDir)) {
                 qWarning() << "Could not create mapping disk cache directory: " << cacheDir;
-                cacheDir = QDir::homePath() + QLatin1String("/.qgcmapscache/");
+                cacheDir = QDir::homePath() + QStringLiteral("/.qgcmapscache/");
             }
         }
     }
@@ -242,7 +250,7 @@ QGeoTiledMappingManagerEngineQGC::_setCache(const QVariantMap &parameters)
     if(memLimit > 1024 * 1024 * 1024)
         memLimit = 1024 * 1024 * 1024;
     //-- Disable Qt's disk cache (sort of)
-#if QT_VERSION >= 0x050600
+#if QT_VERSION >= QT_VERSION_CHECK(5, 6, 0)
     QAbstractGeoTileCache *pTileCache = new QGeoFileTileCache(cacheDir);
     setTileCache(pTileCache);
 #else

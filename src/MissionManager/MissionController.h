@@ -15,7 +15,8 @@
 #include "QmlObjectListModel.h"
 #include "Vehicle.h"
 #include "QGCLoggingCategory.h"
-#include "MavlinkQmlSingleton.h"
+
+#include "QGCGeoBoundingCube.h"
 
 #include <QHash>
 
@@ -26,6 +27,7 @@ class MissionSettingsItem;
 class AppSettings;
 class MissionManager;
 class SimpleMissionItem;
+class ComplexMissionItem;
 class QDomDocument;
 
 Q_DECLARE_LOGGING_CATEGORY(MissionControllerLog)
@@ -41,7 +43,7 @@ public:
     MissionController(PlanMasterController* masterController, QObject* parent = NULL);
     ~MissionController();
 
-    typedef struct {
+    typedef struct _MissionFlightStatus_t {
         double  maxTelemetryDistance;
         double  totalDistance;
         double  totalTime;
@@ -54,6 +56,7 @@ public:
         double  vehicleSpeed;           ///< Either cruise or hover speed based on vehicle type and vtol state
         double  vehicleYaw;
         double  gimbalYaw;              ///< NaN signals yaw was never changed
+        double  gimbalPitch;            ///< NaN signals pitch was never changed
         int     mAhBattery;             ///< 0 for not available
         double  hoverAmps;              ///< Amp consumption during hover
         double  cruiseAmps;             ///< Amp consumption during cruise
@@ -65,12 +68,14 @@ public:
     } MissionFlightStatus_t;
 
     Q_PROPERTY(QmlObjectListModel*  visualItems             READ visualItems                NOTIFY visualItemsChanged)
-    Q_PROPERTY(QmlObjectListModel*  waypointLines           READ waypointLines              NOTIFY waypointLinesChanged)
+    Q_PROPERTY(QmlObjectListModel*  waypointLines           READ waypointLines              NOTIFY waypointLinesChanged)        ///< Used by Plan view only for interactive editing
+    Q_PROPERTY(QVariantList         waypointPath            READ waypointPath               NOTIFY waypointPathChanged)         ///< Used by Fly view only for static display
     Q_PROPERTY(QStringList          complexMissionItemNames READ complexMissionItemNames    NOTIFY complexMissionItemNamesChanged)
     Q_PROPERTY(QGeoCoordinate       plannedHomePosition     READ plannedHomePosition        NOTIFY plannedHomePositionChanged)
 
     Q_PROPERTY(double               progressPct             READ progressPct                NOTIFY progressPctChanged)
 
+    Q_PROPERTY(int                  missionItemCount        READ missionItemCount           NOTIFY missionItemCountChanged)     ///< True mission item command count (only valid in Fly View)
     Q_PROPERTY(int                  currentMissionIndex     READ currentMissionIndex        NOTIFY currentMissionIndexChanged)
     Q_PROPERTY(int                  resumeMissionIndex      READ resumeMissionIndex         NOTIFY resumeMissionIndexChanged)   ///< Returns the item index two which a mission should be resumed. -1 indicates resume mission not available.
 
@@ -87,6 +92,11 @@ public:
 
     Q_PROPERTY(int                  batteryChangePoint      READ batteryChangePoint         NOTIFY batteryChangePointChanged)
     Q_PROPERTY(int                  batteriesRequired       READ batteriesRequired          NOTIFY batteriesRequiredChanged)
+    Q_PROPERTY(QGCGeoBoundingCube*  travelBoundingCube      READ travelBoundingCube         NOTIFY missionBoundingCubeChanged)
+
+    Q_PROPERTY(QString              surveyComplexItemName           READ surveyComplexItemName          CONSTANT)
+    Q_PROPERTY(QString              corridorScanComplexItemName     READ corridorScanComplexItemName    CONSTANT)
+    Q_PROPERTY(QString              structureScanComplexItemName    READ structureScanComplexItemName   CONSTANT)
 
     Q_INVOKABLE void removeMissionItem(int index);
 
@@ -107,6 +117,12 @@ public:
     /// @return Sequence number for new item
     Q_INVOKABLE int insertComplexMissionItem(QString itemName, QGeoCoordinate mapCenterCoordinate, int i);
 
+    /// Add a new complex mission item to the list
+    ///     @param itemName: Name of complex item to create (from complexMissionItemNames)
+    ///     @param i: index to insert at, -1 for end
+    /// @return Sequence number for new item
+    Q_INVOKABLE int insertComplexMissionItemFromKML(QString itemName, QString kmlFile, int i);
+
     Q_INVOKABLE void resumeMission(int resumeIndex);
 
     /// Updates the altitudes of the items in the current mission to the new default altitude
@@ -116,15 +132,22 @@ public:
     ///     @param sequenceNumber - index for new item, -1 to clear current item
     Q_INVOKABLE void setCurrentPlanViewIndex(int sequenceNumber, bool force);
 
+    /// Determines if the mission has all data needed to be saved or sent to the vehicle. Currently the only case where this
+    /// would return false is when it is still waiting on terrain data to determine correct altitudes.
+    bool readyForSaveSend(void) const;
+
     /// Sends the mission items to the specified vehicle
     static void sendItemsToVehicle(Vehicle* vehicle, QmlObjectListModel* visualMissionItems);
 
     bool loadJsonFile(QFile& file, QString& errorString);
     bool loadTextFile(QFile& file, QString& errorString);
 
+    QGCGeoBoundingCube* travelBoundingCube  () { return &_travelBoundingCube; }
+    QGeoCoordinate      takeoffCoordinate   () { return _takeoffCoordinate; }
+
     // Overrides from PlanElementController
-    bool supported                  (void) const final { return true; };
-    void start                      (bool editMode) final;
+    bool supported                  (void) const final { return true; }
+    void start                      (bool flyView) final;
     void save                       (QJsonObject& json) final;
     bool load                       (const QJsonObject& json, QString& errorString) final;
     void loadFromVehicle            (void) final;
@@ -143,13 +166,18 @@ public:
 
     // Property accessors
 
-    QmlObjectListModel* visualItems             (void) { return _visualItems; }
-    QmlObjectListModel* waypointLines           (void) { return &_waypointLines; }
-    QStringList         complexMissionItemNames (void) const;
-    QGeoCoordinate      plannedHomePosition     (void) const;
-    VisualMissionItem*  currentPlanViewItem     (void) const;
-    double              progressPct             (void) const { return _progressPct; }
+    QmlObjectListModel* visualItems                 (void) { return _visualItems; }
+    QmlObjectListModel* waypointLines               (void) { return &_waypointLines; }
+    QVariantList        waypointPath                (void) { return _waypointPath; }
+    QStringList         complexMissionItemNames     (void) const;
+    QGeoCoordinate      plannedHomePosition         (void) const;
+    VisualMissionItem*  currentPlanViewItem         (void) const;
+    double              progressPct                 (void) const { return _progressPct; }
+    QString             surveyComplexItemName       (void) const { return _surveyMissionItemName; }
+    QString             corridorScanComplexItemName (void) const { return _corridorScanMissionItemName; }
+    QString             structureScanComplexItemName(void) const { return _structureScanMissionItemName; }
 
+    int missionItemCount            (void) const { return _missionItemCount; }
     int currentMissionIndex         (void) const;
     int resumeMissionIndex          (void) const;
     int currentPlanViewIndex        (void) const;
@@ -166,27 +194,30 @@ public:
     int  batteriesRequired          (void) const { return _missionFlightStatus.batteriesRequired; }     ///< -1 for not supported
 
 signals:
-    void visualItemsChanged(void);
-    void waypointLinesChanged(void);
-    void newItemsFromVehicle(void);
-    void missionDistanceChanged(double missionDistance);
-    void missionTimeChanged(void);
-    void missionHoverDistanceChanged(double missionHoverDistance);
-    void missionHoverTimeChanged(void);
-    void missionCruiseDistanceChanged(double missionCruiseDistance);
-    void missionCruiseTimeChanged(void);
-    void missionMaxTelemetryChanged(double missionMaxTelemetry);
-    void complexMissionItemNamesChanged(void);
-    void resumeMissionIndexChanged(void);
-    void resumeMissionReady(void);
-    void resumeMissionUploadFail(void);
-    void batteryChangePointChanged(int batteryChangePoint);
-    void batteriesRequiredChanged(int batteriesRequired);
-    void plannedHomePositionChanged(QGeoCoordinate plannedHomePosition);
-    void progressPctChanged(double progressPct);
-    void currentMissionIndexChanged(int currentMissionIndex);
-    void currentPlanViewIndexChanged();
-    void currentPlanViewItemChanged();
+    void visualItemsChanged             (void);
+    void waypointLinesChanged           (void);
+    void waypointPathChanged            (void);
+    void newItemsFromVehicle            (void);
+    void missionDistanceChanged         (double missionDistance);
+    void missionTimeChanged             (void);
+    void missionHoverDistanceChanged    (double missionHoverDistance);
+    void missionHoverTimeChanged        (void);
+    void missionCruiseDistanceChanged   (double missionCruiseDistance);
+    void missionCruiseTimeChanged       (void);
+    void missionMaxTelemetryChanged     (double missionMaxTelemetry);
+    void complexMissionItemNamesChanged (void);
+    void resumeMissionIndexChanged      (void);
+    void resumeMissionReady             (void);
+    void resumeMissionUploadFail        (void);
+    void batteryChangePointChanged      (int batteryChangePoint);
+    void batteriesRequiredChanged       (int batteriesRequired);
+    void plannedHomePositionChanged     (QGeoCoordinate plannedHomePosition);
+    void progressPctChanged             (double progressPct);
+    void currentMissionIndexChanged     (int currentMissionIndex);
+    void currentPlanViewIndexChanged    (void);
+    void currentPlanViewItemChanged     (void);
+    void missionBoundingCubeChanged     (void);
+    void missionItemCountChanged        (int missionItemCount);
 
 private slots:
     void _newMissionItemsAvailableFromVehicle(bool removeAllRequested);
@@ -201,6 +232,8 @@ private slots:
     void _visualItemsDirtyChanged(bool dirty);
     void _managerSendComplete(bool error);
     void _managerRemoveAllComplete(bool error);
+    void _updateTimeout();
+    void _complexBoundingBoxChanged();
 
 private:
     void _init(void);
@@ -214,7 +247,7 @@ private:
     void _setupActiveVehicle(Vehicle* activeVehicle, bool forceLoadFromVehicle);
     void _calcPrevWaypointValues(double homeAlt, VisualMissionItem* currentItem, VisualMissionItem* prevItem, double* azimuth, double* distance, double* altDifference);
     static double _calcDistanceToHome(VisualMissionItem* currentItem, VisualMissionItem* homeItem);
-    bool _findPreviousAltitude(int newIndex, double* prevAltitude, MAV_FRAME* prevFrame);
+    bool _findPreviousAltitude(int newIndex, double* prevAltitude, int* prevAltitudeMode);
     static double _normalizeLat(double lat);
     static double _normalizeLon(double lon);
     void _addMissionSettings(QmlObjectListModel* visualItems, bool addToCenter);
@@ -223,7 +256,7 @@ private:
     bool _loadJsonMissionFileV2(const QJsonObject& json, QmlObjectListModel* visualItems, QString& errorString);
     bool _loadTextMissionFile(QTextStream& stream, QmlObjectListModel* visualItems, QString& errorString);
     int _nextSequenceNumber(void);
-    static void _scanForAdditionalSettings(QmlObjectListModel* visualItems, Vehicle* vehicle);
+    void _scanForAdditionalSettings(QmlObjectListModel* visualItems, Vehicle* vehicle);
     static bool _convertToMissionItems(QmlObjectListModel* visualMissionItems, QList<MissionItem*>& rgMissionItems, QObject* missionItemParent);
     void _setPlannedHomePositionFromFirstCoordinate(void);
     void _resetMissionFlightStatus(void);
@@ -233,25 +266,33 @@ private:
     bool _loadItemsFromJson(const QJsonObject& json, QmlObjectListModel* visualItems, QString& errorString);
     void _initLoadedVisualItems(QmlObjectListModel* loadedVisualItems);
     void _addWaypointLineSegment(CoordVectHashTable& prevItemPairHashTable, VisualItemPair& pair);
-    void _addCommandTimeDelay(SimpleMissionItem* simpleItem, bool vtolInHover);
     void _addTimeDistance(bool vtolInHover, double hoverTime, double cruiseTime, double extraTime, double distance, int seqNum);
+    int _insertComplexMissionItemWorker(ComplexMissionItem* complexItem, int i);
+    void _warnIfTerrainFrameUsed(void);
 
 private:
     MissionManager*         _missionManager;
+    int                     _missionItemCount;
     QmlObjectListModel*     _visualItems;
     MissionSettingsItem*    _settingsItem;
     QmlObjectListModel      _waypointLines;
+    QVariantList            _waypointPath;
     CoordVectHashTable      _linesTable;
     bool                    _firstItemsFromVehicle;
     bool                    _itemsRequested;
+    bool                    _inRecalcSequence;
     MissionFlightStatus_t   _missionFlightStatus;
     QString                 _surveyMissionItemName;
     QString                 _fwLandingMissionItemName;
     QString                 _structureScanMissionItemName;
+    QString                 _corridorScanMissionItemName;
     AppSettings*            _appSettings;
     double                  _progressPct;
     int                     _currentPlanViewIndex;
     VisualMissionItem*      _currentPlanViewItem;
+    QTimer                  _updateTimer;
+    QGCGeoBoundingCube      _travelBoundingCube;
+    QGeoCoordinate          _takeoffCoordinate;
 
     static const char*  _settingsGroup;
 

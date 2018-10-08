@@ -13,8 +13,12 @@
 #include "CameraMetaData.h"
 #include "SettingsManager.h"
 #include "AppSettings.h"
+#include "QGCFileDownload.h"
 
+#include <QRegularExpression>
 #include <QDebug>
+
+QGC_LOGGING_CATEGORY(FirmwarePluginLog, "FirmwarePluginLog")
 
 static FirmwarePluginFactoryRegister* _instance = NULL;
 
@@ -150,6 +154,12 @@ bool FirmwarePlugin::supportsJSButton(void)
     return false;
 }
 
+bool FirmwarePlugin::supportsTerrainFrame(void) const
+{
+    // Generic firmware supports this since we don't know
+    return true;
+}
+
 bool FirmwarePlugin::adjustIncomingMavlinkMessage(Vehicle* vehicle, mavlink_message_t* message)
 {
     Q_UNUSED(vehicle);
@@ -264,12 +274,6 @@ void FirmwarePlugin::guidedModeTakeoff(Vehicle* vehicle, double takeoffAltRel)
     qgcApp()->showMessage(guided_mode_not_supported_by_vehicle);
 }
 
-void FirmwarePlugin::guidedModeOrbit(Vehicle* /*vehicle*/, const QGeoCoordinate& /*centerCoord*/, double /*radius*/, double /*velocity*/, double /*altitude*/)
-{
-    // Not supported by generic vehicle
-    qgcApp()->showMessage(guided_mode_not_supported_by_vehicle);
-}
-
 void FirmwarePlugin::guidedModeGotoLocation(Vehicle* vehicle, const QGeoCoordinate& gotoCoord)
 {
     // Not supported by generic vehicle
@@ -335,8 +339,10 @@ const QVariantList &FirmwarePlugin::toolBarIndicators(const Vehicle* vehicle)
         _toolBarIndicatorList.append(QVariant::fromValue(QUrl::fromUserInput("qrc:/toolbar/RCRSSIIndicator.qml")));
         _toolBarIndicatorList.append(QVariant::fromValue(QUrl::fromUserInput("qrc:/toolbar/BatteryIndicator.qml")));
         _toolBarIndicatorList.append(QVariant::fromValue(QUrl::fromUserInput("qrc:/toolbar/ModeIndicator.qml")));
+        _toolBarIndicatorList.append(QVariant::fromValue(QUrl::fromUserInput("qrc:/toolbar/VTOLModeIndicator.qml")));
         _toolBarIndicatorList.append(QVariant::fromValue(QUrl::fromUserInput("qrc:/toolbar/ArmedIndicator.qml")));
         _toolBarIndicatorList.append(QVariant::fromValue(QUrl::fromUserInput("qrc:/toolbar/GPSRTKIndicator.qml")));
+        _toolBarIndicatorList.append(QVariant::fromValue(QUrl::fromUserInput("qrc:/toolbar/LinkIndicator.qml")));
     }
     return _toolBarIndicatorList;
 }
@@ -347,6 +353,18 @@ const QVariantList& FirmwarePlugin::cameraList(const Vehicle* vehicle)
 
     if (_cameraList.size() == 0) {
         CameraMetaData* metaData;
+
+        metaData = new CameraMetaData(tr("Sony NEX-5R 20mm"),  //http://www.sony.co.uk/electronics/interchangeable-lens-cameras/ilce-qx1-body-kit/specifications
+                                      23.2,                 //http://www.sony.com/electronics/camera-lenses/sel16f28/specifications
+                                      15.4,
+                                      4912,
+                                      3264,
+                                      20,
+                                      true,
+                                      false,
+                                      1,
+                                      this);
+        _cameraList.append(QVariant::fromValue(metaData));
 
         metaData = new CameraMetaData(tr("Sony ILCE-QX1"),  //http://www.sony.co.uk/electronics/interchangeable-lens-cameras/ilce-qx1-body-kit/specifications
                                       23.2,                 //http://www.sony.com/electronics/camera-lenses/sel16f28/specifications
@@ -450,6 +468,66 @@ const QVariantList& FirmwarePlugin::cameraList(const Vehicle* vehicle)
                                       1280,     // imageWidth
                                       960,      // imageHeight
                                       5.5,      // focalLength
+                                      true,     // landscape
+                                      false,    // fixedOrientation
+                                      0,        // minTriggerInterval
+                                      this);
+        _cameraList.append(QVariant::fromValue(metaData));
+
+        metaData = new CameraMetaData(tr("Parrot Sequioa RGB"),
+                                      6.17,     // sensorWidth
+                                      4.63,     // sendsorHeight
+                                      4608,     // imageWidth
+                                      3456,     // imageHeight
+                                      4.9,      // focalLength
+                                      true,     // landscape
+                                      false,    // fixedOrientation
+                                      1,        // minTriggerInterval
+                                      this);
+        _cameraList.append(QVariant::fromValue(metaData));
+
+        metaData = new CameraMetaData(tr("Parrot Sequioa Monochrome"),
+                                      4.8,      // sensorWidth
+                                      3.6,      // sendsorHeight
+                                      1280,     // imageWidth
+                                      960,      // imageHeight
+                                      4.0,      // focalLength
+                                      true,     // landscape
+                                      false,    // fixedOrientation
+                                      0.8,      // minTriggerInterval
+                                      this);
+        _cameraList.append(QVariant::fromValue(metaData));
+
+        metaData = new CameraMetaData(tr("GoPro Hero 4"),
+                                      6.17,     // sensorWidth
+                                      4.55,     // sendsorHeight
+                                      4000,     // imageWidth
+                                      3000,     // imageHeight
+                                      2.98,     // focalLength
+                                      true,     // landscape
+                                      false,    // fixedOrientation
+                                      0,        // minTriggerInterval
+                                      this);
+        _cameraList.append(QVariant::fromValue(metaData));
+
+        metaData = new CameraMetaData(tr("Sentera NDVI Single Sensor"),
+                                      4.68,     // sensorWidth
+                                      3.56,     // sendsorHeight
+                                      1248,     // imageWidth
+                                      952,      // imageHeight
+                                      4.14,     // focalLength
+                                      true,     // landscape
+                                      false,    // fixedOrientation
+                                      0,        // minTriggerInterval
+                                      this);
+        _cameraList.append(QVariant::fromValue(metaData));
+
+        metaData = new CameraMetaData(tr("Sentera Double 4K Sensor"),
+                                      6.2,      // sensorWidth
+                                      4.65,     // sendsorHeight
+                                      4000,     // imageWidth
+                                      3000,     // imageHeight
+                                      5.4,      // focalLength
                                       true,     // landscape
                                       false,    // fixedOrientation
                                       0,        // minTriggerInterval
@@ -583,4 +661,82 @@ QGCCameraControl* FirmwarePlugin::createCameraControl(const mavlink_camera_infor
     return NULL;
 }
 
+uint32_t FirmwarePlugin::highLatencyCustomModeTo32Bits(uint16_t hlCustomMode)
+{
+    // Standard implementation assumes no special handling. Upper part of 32 bit value is not used.
+    return hlCustomMode;
+}
 
+void FirmwarePlugin::checkIfIsLatestStable(Vehicle* vehicle)
+{
+    // This is required as mocklink uses a hardcoded firmware version
+    if (qgcApp()->runningUnitTests()) {
+        qCDebug(FirmwarePluginLog) << "Skipping version check";
+        return;
+    }
+    QString versionFile = _getLatestVersionFileUrl(vehicle);
+    qCDebug(FirmwarePluginLog) << "Downloading" << versionFile;
+    QGCFileDownload* downloader = new QGCFileDownload(this);
+    connect(
+        downloader,
+        &QGCFileDownload::downloadFinished,
+        this,
+        [vehicle, this](QString remoteFile, QString localFile) {
+            _versionFileDownloadFinished(remoteFile, localFile, vehicle);
+            sender()->deleteLater();
+        });
+    downloader->download(versionFile);
+}
+
+void FirmwarePlugin::_versionFileDownloadFinished(QString& remoteFile, QString& localFile, Vehicle* vehicle)
+{
+    qCDebug(FirmwarePluginLog) << "Download complete" << remoteFile << localFile;
+    // Now read the version file and pull out the version string
+    QFile versionFile(localFile);
+    if (!versionFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qCWarning(FirmwarePluginLog) << "Error opening downloaded version file.";
+        return;
+    }
+
+    QTextStream stream(&versionFile);
+    QString versionFileContents = stream.readAll();
+    QString version;
+    QRegularExpressionMatch match = QRegularExpression(_versionRegex()).match(versionFileContents);
+
+    qCDebug(FirmwarePluginLog) << "Looking for version number...";
+
+    if (match.hasMatch()) {
+        version = match.captured(1);
+    } else {
+        qCWarning(FirmwarePluginLog) << "Unable to parse version info from file" << remoteFile;
+        return;
+    }
+
+    qCDebug(FirmwarePluginLog) << "Latest stable version = "  << version;
+    QStringList versionNumbers = version.split(".");
+    if(versionNumbers.size() != 3) {
+        qCWarning(FirmwarePluginLog) << "Error parsing version number: wrong format";
+        return;
+    }
+    int stableMajor = versionNumbers[0].toInt();
+    int stableMinor = versionNumbers[1].toInt();
+    int stablePatch = versionNumbers[2].toInt();
+
+    int currMajor = vehicle->firmwareMajorVersion();
+    int currMinor = vehicle->firmwareMinorVersion();
+    int currPatch = vehicle->firmwarePatchVersion();
+    int currType = vehicle->firmwareVersionType();
+
+    if (currMajor < stableMajor
+        || (currMajor == stableMajor && currMinor < stableMinor)
+        || (currMajor == stableMajor && currMinor == stableMinor && currPatch < stablePatch)
+        || (currMajor == stableMajor && currMinor == stableMinor && currPatch == stablePatch && currType != FIRMWARE_VERSION_TYPE_OFFICIAL)
+        )
+    {
+        const static QString currentVersion = QString("%1.%2.%3").arg(vehicle->firmwareMajorVersion())
+                                                                 .arg(vehicle->firmwareMinorVersion())
+                                                                 .arg(vehicle->firmwarePatchVersion());
+        const static QString message = tr("Vehicle is not running latest stable firmware! Running %2-%1, latest stable is %3.");
+        qgcApp()->showMessage(message.arg(vehicle->firmwareVersionTypeString(), currentVersion, version));
+    }
+}
